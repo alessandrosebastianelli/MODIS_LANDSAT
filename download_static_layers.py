@@ -69,8 +69,12 @@ try:
     ee.Initialize(project=config['ee_project'])
     logger.info("Earth Engine initialized")
 except:
-    ee.Authenticate()
-    ee.Initialize(project=config['ee_project'])
+    #ee.Authenticate()
+    #ee.Initialize(project=config['ee_project'])
+    KEY_FILE = config['service_account']['key_file']
+    SERVICE_ACCOUNT = config['service_account']['email']
+    credentials = ee.ServiceAccountCredentials(SERVICE_ACCOUNT, KEY_FILE)
+    ee.Initialize(credentials)
     logger.info("Earth Engine authenticated and initialized")
 
 # ============================================
@@ -225,43 +229,12 @@ if config['static_layers']['dem']['enabled']:
             logger.error("✗ DEM mosaic failed")
 
 # ============================================
-# 2. DOWNLOAD LAND COVER
-# ============================================
-
-if config['static_layers']['land_cover']['enabled']:
-    logger.info("\n" + "="*70)
-    logger.info("2. LAND COVER (ESA WorldCover)")
-    logger.info("="*70)
-    
-    lc_file = static_dir / 'LandCover.tif'
-    
-    if lc_file.exists():
-        logger.info("Land Cover already exists, skipping")
-    else:
-        lc = ee.ImageCollection(config['static_layers']['land_cover']['collection'])
-        lc = lc.first().select(config['static_layers']['land_cover']['bands'])
-        
-        tile_files = []
-        for tile in tiles:
-            tile_file = tiles_dir / f"lc_t{tile['id']:02d}.tif"
-            if download_tile(lc, tile['bounds'], tile_file):
-                tile_files.append(tile_file)
-        
-        if mosaic_tiles(tile_files, lc_file):
-            logger.info(f"✓ Land Cover saved: {lc_file.name}")
-            for f in tile_files:
-                if f.exists():
-                    f.unlink()
-        else:
-            logger.error("✗ Land Cover mosaic failed")
-
-# ============================================
-# 3. CREATE WATER MASK
+# 2. CREATE WATER MASK
 # ============================================
 
 if config['static_layers']['water_mask']['enabled']:
     logger.info("\n" + "="*70)
-    logger.info("3. WATER MASK (Combined)")
+    logger.info("2. WATER MASK (Combined)")
     logger.info("="*70)
     
     water_file = static_dir / 'WaterMask.tif'
@@ -297,46 +270,6 @@ if config['static_layers']['water_mask']['enabled']:
         else:
             logger.error("✗ Water Mask mosaic failed")
 
-# ============================================
-# 4. CREATE EMISSIVITY MAP
-# ============================================
-
-if config['static_layers']['emissivity']['enabled']:
-    logger.info("\n" + "="*70)
-    logger.info("4. EMISSIVITY (from Land Cover)")
-    logger.info("="*70)
-    
-    emis_file = static_dir / 'Emissivity.tif'
-    
-    if emis_file.exists():
-        logger.info("Emissivity already exists, skipping")
-    else:
-        lc = ee.ImageCollection('ESA/WorldCover/v200').first().select('Map')
-        
-        # Create emissivity map from lookup table
-        emis_lookup = config['static_layers']['emissivity']['lookup']
-        emis = ee.Image(0.0)
-        
-        for lc_class, emis_value in emis_lookup.items():
-            mask = lc.eq(int(lc_class))
-            emis = emis.where(mask, emis_value)
-        
-        emis = emis.rename('emissivity')
-        
-        tile_files = []
-        for tile in tiles:
-            tile_file = tiles_dir / f"emis_t{tile['id']:02d}.tif"
-            if download_tile(emis, tile['bounds'], tile_file):
-                tile_files.append(tile_file)
-        
-        if mosaic_tiles(tile_files, emis_file):
-            logger.info(f"✓ Emissivity saved: {emis_file.name}")
-            for f in tile_files:
-                if f.exists():
-                    f.unlink()
-        else:
-            logger.error("✗ Emissivity mosaic failed")
-
 # Cleanup tiles directory
 try:
     tiles_dir.rmdir()
@@ -357,4 +290,6 @@ for f in files_created:
     size_mb = f.stat().st_size / (1024**2)
     logger.info(f"  • {f.name}: {size_mb:.2f} MB")
 
+logger.info("\nNote: Land Cover and Emissivity are downloaded dynamically")
+logger.info("      with each Landsat/MODIS composite (15-day frequency)")
 logger.info("="*70)

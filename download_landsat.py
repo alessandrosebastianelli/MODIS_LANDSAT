@@ -70,8 +70,12 @@ try:
     ee.Initialize(project=config['ee_project'])
     logger.info("Earth Engine initialized")
 except:
-    ee.Authenticate()
-    ee.Initialize(project=config['ee_project'])
+    #ee.Authenticate()
+    #ee.Initialize(project=config['ee_project'])
+    KEY_FILE = config['service_account']['key_file']
+    SERVICE_ACCOUNT = config['service_account']['email']
+    credentials = ee.ServiceAccountCredentials(SERVICE_ACCOUNT, KEY_FILE)
+    ee.Initialize(credentials)
     logger.info("Earth Engine authenticated and initialized")
 
 # ============================================
@@ -136,6 +140,35 @@ def create_tiles(bounds, tile_size):
 
 tiles = create_tiles(geometry, TILE_SIZE)
 logger.info(f"Created {len(tiles)} tiles")
+
+# ============================================
+# LAND COVER AND EMISSIVITY
+# ============================================
+
+def get_land_cover_for_date(date_str):
+    """Get MODIS land cover for a specific date (yearly data)"""
+    year = datetime.fromisoformat(date_str).year
+    
+    # MODIS Land Cover is yearly, get the collection for that year
+    lc_collection = ee.ImageCollection('MODIS/061/MCD12Q1')
+    lc_image = lc_collection.filterDate(f'{year}-01-01', f'{year}-12-31').first()
+    
+    if lc_image:
+        return lc_image.select('LC_Type1').rename('land_cover')
+    else:
+        # Fallback to most recent available
+        return lc_collection.sort('system:time_start', False).first().select('LC_Type1').rename('land_cover')
+
+def calculate_emissivity_from_lc(land_cover_image):
+    """Calculate emissivity from MODIS land cover"""
+    emis_lookup = config['dynamic_layers']['emissivity']['lookup']
+    
+    emis = ee.Image(0.0)
+    for lc_class, emis_value in emis_lookup.items():
+        mask = land_cover_image.eq(int(lc_class))
+        emis = emis.where(mask, emis_value)
+    
+    return emis.rename('emissivity_dynamic')
 
 # ============================================
 # LST/SST CALCULATION
@@ -264,21 +297,34 @@ num_composites = landsat_composites.size().getInfo()
 logger.info(f"Created {num_composites} composites")
 
 # ============================================
-# ADD COORDINATES
+# ADD COORDINATES AND DYNAMIC LAYERS
 # ============================================
 
-def add_coordinates(image):
-    """Add lat/lon/time"""
+def add_coordinates_and_dynamic_layers(image):
+    """Add lat/lon/time + land cover + emissivity"""
     latlon = ee.Image.pixelLonLat().reproject(crs='EPSG:4326', scale=TARGET_RESOLUTION)
     
     time_img = ee.Image.constant(
         ee.Number(image.get('system:time_start')).divide(86400000)
     ).rename('time').float()
     
+    # Get date for this composite
+    date_str = ee.String(image.get('date_string')).getInfo()
+    
+    # Add land cover for this date
+    land_cover = get_land_cover_for_date(date_str)
+    # Resample to target resolution
+    land_cover = land_cover.reproject(crs='EPSG:4326', scale=TARGET_RESOLUTION)
+    
+    # Calculate emissivity from land cover
+    emissivity_dyn = calculate_emissivity_from_lc(land_cover)
+    
     return (image
             .addBands(latlon.select('longitude').rename('lon'))
             .addBands(latlon.select('latitude').rename('lat'))
-            .addBands(time_img))
+            .addBands(time_img)
+            .addBands(land_cover)
+            .addBands(emissivity_dyn))
 
 # ============================================
 # DOWNLOAD FUNCTIONS
@@ -365,7 +411,7 @@ for i in range(num_composites):
     
     logger.info(f"[{i+1:3d}/{num_composites}] DOWNLOADING: {final_file.name}")
     
-    composite_final = add_coordinates(composite)
+    composite_final = add_coordinates_and_dynamic_layers(composite)
     
     # Download tiles
     tile_files = []
@@ -437,6 +483,10 @@ logger.info("    LST_K_masked: LST with cloud mask")
 logger.info("    SST_K: Sea Surface Temperature")
 logger.info("    cloud_mask: Binary mask")
 logger.info("    NDVI, emissivity")
+logger.info("  Dynamic layers (15-day frequency):")
+logger.info("    land_cover: MODIS land cover")
+logger.info("    emissivity_dynamic: Emissivity from land cover")
 logger.info("  Coordinates:")
 logger.info("    lon, lat, time")
+logger.info(f"  Total: ~20 bands per file")
 logger.info("="*70)

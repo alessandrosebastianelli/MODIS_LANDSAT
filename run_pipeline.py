@@ -91,7 +91,7 @@ STEPS = [
     {
         'name': 'Create NetCDF',
         'script': 'make_netcdf.py',
-        'description': 'Combine all data into NetCDF with LST/SST hybrid',
+        'description': 'Combine all data into NetCDF with required structure',
         'required': True
     }
 ]

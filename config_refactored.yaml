@@ -5,7 +5,12 @@
 # ============================================
 
 # Earth Engine Project ID
-ee_project: 'ee-alessandrosebastianelli1995'
+ee_project: 'gee-juno'
+
+# Service Account Authentication (fallback)
+service_account:
+  key_file: '/users_home/cmcc/as24625/gee/gee-juno-cbcb3359e8cd.json'
+  email: 'gee-252@gee-juno.iam.gserviceaccount.com'
 
 # Area of Interest (Rome, Italy - extended coastal area)
 geometry:
@@ -23,7 +28,7 @@ temporal:
 # Spatial parameters
 spatial:
   target_resolution: 30  # meters
-  tile_size: 0.4         # degrees (~44km)
+  tile_size: 0.2         # degrees (~44km)
 
 # Landsat sensors configuration
 landsat:
@@ -79,33 +84,14 @@ modis:
     - 'View_time_Day'    # Daytime observation time
     - 'View_time_Night'  # Nighttime observation time
 
-# Static layers (downloaded once)
+# Static layers (downloaded once - truly time-independent)
 static_layers:
   
   dem:
     enabled: true
     collection: 'USGS/SRTMGL1_003'  # SRTM 30m DEM
     bands: ['elevation']
-    description: 'Digital Elevation Model'
-  
-  land_cover:
-    enabled: true
-    collection: 'ESA/WorldCover/v200'  # ESA WorldCover 10m
-    year: 2021
-    bands: ['Map']
-    description: 'ESA WorldCover 2021'
-    classes:
-      10: 'Tree cover'
-      20: 'Shrubland'
-      30: 'Grassland'
-      40: 'Cropland'
-      50: 'Built-up'
-      60: 'Bare / sparse vegetation'
-      70: 'Snow and ice'
-      80: 'Permanent water bodies'
-      90: 'Herbaceous wetland'
-      95: 'Mangroves'
-      100: 'Moss and lichen'
+    description: 'Digital Elevation Model (static)'
   
   water_mask:
     enabled: true
@@ -121,24 +107,57 @@ static_layers:
       - collection: 'ESA/WorldCover/v200'  # ESA land cover water classes
         classes: [80, 90, 95]  # Water bodies, wetlands, mangroves
     
-    description: 'Combined water mask (seas, oceans, rivers, lakes)'
+    description: 'Combined water mask (seas, oceans, rivers, lakes) - static'
+
+# Dynamic layers (same frequency as Landsat/MODIS - 15 day composites)
+dynamic_layers:
+  
+  land_cover:
+    enabled: true
+    collection: 'MODIS/061/MCD12Q1'  # MODIS Land Cover Type Yearly
+    band: 'LC_Type1'  # IGBP classification
+    description: 'MODIS Land Cover (yearly, assigned to each composite)'
+    classes:
+      1: 'Evergreen Needleleaf Forests'
+      2: 'Evergreen Broadleaf Forests'
+      3: 'Deciduous Needleleaf Forests'
+      4: 'Deciduous Broadleaf Forests'
+      5: 'Mixed Forests'
+      6: 'Closed Shrublands'
+      7: 'Open Shrublands'
+      8: 'Woody Savannas'
+      9: 'Savannas'
+      10: 'Grasslands'
+      11: 'Permanent Wetlands'
+      12: 'Croplands'
+      13: 'Urban and Built-up Lands'
+      14: 'Cropland/Natural Vegetation Mosaics'
+      15: 'Permanent Snow and Ice'
+      16: 'Barren'
+      17: 'Water Bodies'
   
   emissivity:
     enabled: true
-    description: 'Land surface emissivity from land cover lookup'
-    # Emissivity values by ESA WorldCover class
+    description: 'Land surface emissivity derived from MODIS land cover'
+    # Emissivity lookup by MODIS LC_Type1 class
     lookup:
-      10: 0.990  # Tree cover
-      20: 0.982  # Shrubland
-      30: 0.970  # Grassland
-      40: 0.985  # Cropland
-      50: 0.990  # Built-up
-      60: 0.930  # Bare / sparse vegetation
-      70: 0.950  # Snow and ice
-      80: 0.986  # Permanent water bodies
-      90: 0.980  # Herbaceous wetland
-      95: 0.985  # Mangroves
-      100: 0.965 # Moss and lichen
+      1: 0.990   # Evergreen Needleleaf Forests
+      2: 0.990   # Evergreen Broadleaf Forests
+      3: 0.990   # Deciduous Needleleaf Forests
+      4: 0.990   # Deciduous Broadleaf Forests
+      5: 0.990   # Mixed Forests
+      6: 0.982   # Closed Shrublands
+      7: 0.982   # Open Shrublands
+      8: 0.985   # Woody Savannas
+      9: 0.980   # Savannas
+      10: 0.970  # Grasslands
+      11: 0.980  # Permanent Wetlands
+      12: 0.985  # Croplands
+      13: 0.990  # Urban and Built-up
+      14: 0.985  # Cropland/Natural Vegetation Mosaics
+      15: 0.950  # Permanent Snow and Ice
+      16: 0.930  # Barren
+      17: 0.986  # Water Bodies
 
 # Compositing method
 compositing:
