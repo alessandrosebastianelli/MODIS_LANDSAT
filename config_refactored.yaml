@@ -1,0 +1,174 @@
+# ============================================
+# Multi-Sensor LST/SST Pipeline Configuration
+# Landsat + MODIS + DEM + Land Cover + Emissivity + Water Mask
+# 15-day composites at 30m resolution
+# ============================================
+
+# Earth Engine Project ID
+ee_project: 'ee-alessandrosebastianelli1995'
+
+# Area of Interest (Rome, Italy - extended coastal area)
+geometry:
+  min_lon: 11.6  # Western boundary (includes Tyrrhenian Sea)
+  min_lat: 41.4  # Southern boundary
+  max_lon: 13.2  # Eastern boundary
+  max_lat: 42.4  # Northern boundary
+
+# Temporal parameters
+temporal:
+  start_date: '2020-01-01'
+  end_date: '2025-12-31'
+  interval_days: 15  # 15-day composites
+
+# Spatial parameters
+spatial:
+  target_resolution: 30  # meters
+  tile_size: 0.4         # degrees (~44km)
+
+# Landsat sensors configuration
+landsat:
+  sensors:
+    - collection: 'LANDSAT/LC08/C02/T1_L2'
+      start_date: '2020-01-01'
+      end_date: '2021-10-30'
+      name: 'L8'
+    
+    - collection: 'LANDSAT/LC09/C02/T1_L2'
+      start_date: '2021-10-31'
+      end_date: '2025-12-31'
+      name: 'L9'
+  
+  # All Landsat bands
+  bands:
+    # Surface Reflectance (scaled 0-1)
+    - 'SR_B1'      # Coastal/Aerosol (0.43-0.45 µm)
+    - 'SR_B2'      # Blue (0.45-0.51 µm)
+    - 'SR_B3'      # Green (0.53-0.59 µm)
+    - 'SR_B4'      # Red (0.64-0.67 µm)
+    - 'SR_B5'      # NIR (0.85-0.88 µm)
+    - 'SR_B6'      # SWIR1 (1.57-1.65 µm)
+    - 'SR_B7'      # SWIR2 (2.11-2.29 µm)
+    # Thermal
+    - 'ST_B10'     # Thermal Infrared (10.6-11.19 µm)
+    # Quality
+    - 'QA_PIXEL'   # Quality assessment
+  
+  max_cloud_cover: 80
+  
+  path_row_filter:
+    enabled: true
+    paths: [191]
+    rows: []
+
+# MODIS configuration
+modis:
+  collections:
+    terra: 'MODIS/006/MOD11A1'
+    aqua: 'MODIS/006/MYD11A1'
+  
+  # All relevant MODIS bands (resampled 1km -> 30m)
+  bands:
+    - 'LST_Day_1km'      # Daytime LST
+    - 'LST_Night_1km'    # Nighttime LST
+    - 'QC_Day'           # Daytime QC
+    - 'QC_Night'         # Nighttime QC
+    - 'Emis_31'          # Band 31 emissivity (10.78-11.28 µm)
+    - 'Emis_32'          # Band 32 emissivity (11.77-12.27 µm)
+    - 'View_angle_Day'   # Daytime view angle
+    - 'View_angle_Night' # Nighttime view angle
+    - 'View_time_Day'    # Daytime observation time
+    - 'View_time_Night'  # Nighttime observation time
+
+# Static layers (downloaded once)
+static_layers:
+  
+  dem:
+    enabled: true
+    collection: 'USGS/SRTMGL1_003'  # SRTM 30m DEM
+    bands: ['elevation']
+    description: 'Digital Elevation Model'
+  
+  land_cover:
+    enabled: true
+    collection: 'ESA/WorldCover/v200'  # ESA WorldCover 10m
+    year: 2021
+    bands: ['Map']
+    description: 'ESA WorldCover 2021'
+    classes:
+      10: 'Tree cover'
+      20: 'Shrubland'
+      30: 'Grassland'
+      40: 'Cropland'
+      50: 'Built-up'
+      60: 'Bare / sparse vegetation'
+      70: 'Snow and ice'
+      80: 'Permanent water bodies'
+      90: 'Herbaceous wetland'
+      95: 'Mangroves'
+      100: 'Moss and lichen'
+  
+  water_mask:
+    enabled: true
+    # Combined water mask from multiple sources
+    sources:
+      - collection: 'JRC/GSW1_4/GlobalSurfaceWater'  # JRC Global Surface Water
+        band: 'occurrence'  # Water occurrence (0-100%)
+        threshold: 50  # Pixels with >50% water occurrence
+      
+      - collection: 'GLCF/GLS_WATER'  # Global Land Cover Facility
+        band: 'water'
+        
+      - collection: 'ESA/WorldCover/v200'  # ESA land cover water classes
+        classes: [80, 90, 95]  # Water bodies, wetlands, mangroves
+    
+    description: 'Combined water mask (seas, oceans, rivers, lakes)'
+  
+  emissivity:
+    enabled: true
+    description: 'Land surface emissivity from land cover lookup'
+    # Emissivity values by ESA WorldCover class
+    lookup:
+      10: 0.990  # Tree cover
+      20: 0.982  # Shrubland
+      30: 0.970  # Grassland
+      40: 0.985  # Cropland
+      50: 0.990  # Built-up
+      60: 0.930  # Bare / sparse vegetation
+      70: 0.950  # Snow and ice
+      80: 0.986  # Permanent water bodies
+      90: 0.980  # Herbaceous wetland
+      95: 0.985  # Mangroves
+      100: 0.965 # Moss and lichen
+
+# Compositing method
+compositing:
+  method: 'median'  # 'median', 'mean', or 'mosaic'
+  quality_mosaic: true
+
+# Output configuration
+output:
+  base_dir: './LST_Rome_30m_15day'
+  subdirs:
+    landsat: 'landsat'
+    modis: 'modis'
+    static: 'static'
+  netcdf_filename: 'Rome_MultiSensor_LST_SST_2020_2025.nc'
+
+# Download parameters
+download:
+  timeout_seconds: 300
+  delay_between_tiles: 2
+  delay_between_images: 3
+  min_tiles_success_ratio: 0.75
+  max_retries: 3
+
+# Logging
+logging:
+  level: 'INFO'
+  log_file: 'multisensor_pipeline.log'
+  console_colors: true
+
+# Pipeline automation
+pipeline:
+  num_validation_cycles: 2
+  pause_between_cycles: 5
