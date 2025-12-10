@@ -28,7 +28,7 @@ temporal:
 # Spatial parameters
 spatial:
   target_resolution: 30  # meters
-  tile_size: 0.2         # degrees (~44km)
+  tile_size: 0.1         # degrees (~44km)
 
 # Landsat sensors configuration
 landsat:

@@ -18,42 +18,50 @@ import numpy as np
 # ============================================
 
 def setup_logging(config):
+    """Setup logging with file and console handlers"""
     log_level = getattr(logging, config['logging']['level'])
     log_file = config['logging']['log_file']
     
-    logger = logging.getLogger('Static_Layers')
+    logger = logging.getLogger('StaticLayers')
     logger.setLevel(log_level)
     logger.handlers = []
     
+    # File handler - detailed format
     fh = logging.FileHandler(log_file, mode='a')
     fh.setLevel(log_level)
     fh.setFormatter(logging.Formatter(
-        '%(asctime)s | %(levelname)-8s | %(message)s',
+        '%(asctime)s | %(name)-12s | %(levelname)-8s | %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
     ))
     logger.addHandler(fh)
     
+    # Console handler - concise format
     ch = logging.StreamHandler()
     ch.setLevel(log_level)
     
     if config['logging']['console_colors']:
         class ColoredFormatter(logging.Formatter):
-            COLORS = {'DEBUG': '\033[36m', 'INFO': '\033[32m', 'WARNING': '\033[33m',
-                     'ERROR': '\033[31m', 'CRITICAL': '\033[35m'}
+            COLORS = {
+                'DEBUG': '\033[36m',
+                'INFO': '\033[32m',
+                'WARNING': '\033[33m',
+                'ERROR': '\033[31m',
+                'CRITICAL': '\033[35m'
+            }
             RESET = '\033[0m'
             
             def format(self, record):
                 color = self.COLORS.get(record.levelname, self.RESET)
-                record.levelname = f"{color}{record.levelname:<8}{self.RESET}"
-                return super().format(record)
+                # Short format for console
+                formatted = f"{color}{record.levelname[0]}{self.RESET} | {record.getMessage()}"
+                return formatted
         
-        ch.setFormatter(ColoredFormatter('%(asctime)s | %(levelname)s | %(message)s',
-                                        datefmt='%Y-%m-%d %H:%M:%S'))
+        ch.setFormatter(ColoredFormatter())
     else:
-        ch.setFormatter(logging.Formatter('%(asctime)s | %(levelname)-8s | %(message)s',
-                                         datefmt='%Y-%m-%d %H:%M:%S'))
+        ch.setFormatter(logging.Formatter('%(levelname)s | %(message)s'))
     
     logger.addHandler(ch)
+    logger.propagate = False  # Prevent duplicate logs
     return logger
 
 # ============================================
