@@ -13,34 +13,36 @@ import yaml
 import logging
 import rasterio
 from rasterio.merge import merge
+from tqdm import tqdm
 
 # ============================================
 # LOGGING SETUP
 # ============================================
 
 def setup_logging(config):
-    """Setup logging with file and console handlers"""
+    """Setup clean, consistent logging"""
     log_level = getattr(logging, config['logging']['level'])
     log_file = config['logging']['log_file']
     
     logger = logging.getLogger('MODIS')
     logger.setLevel(log_level)
     logger.handlers = []
+    logger.propagate = False
     
-    # File handler - detailed format
+    # File handler
     fh = logging.FileHandler(log_file, mode='a')
     fh.setLevel(log_level)
     fh.setFormatter(logging.Formatter(
-        '%(asctime)s | %(name)-12s | %(levelname)-8s | %(message)s',
+        '%(asctime)s | %(name)-15s | %(levelname)-8s | %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
     ))
     logger.addHandler(fh)
     
-    # Console handler - concise format
+    # Console handler
     ch = logging.StreamHandler()
     ch.setLevel(log_level)
     
-    if config['logging']['console_colors']:
+    if config['logging'].get('console_colors', False):
         class ColoredFormatter(logging.Formatter):
             COLORS = {
                 'DEBUG': '\033[36m',
@@ -53,16 +55,14 @@ def setup_logging(config):
             
             def format(self, record):
                 color = self.COLORS.get(record.levelname, self.RESET)
-                # Short format for console
-                formatted = f"{color}{record.levelname[0]}{self.RESET} | {record.getMessage()}"
-                return formatted
+                levelname_colored = f"{color}{record.levelname[0]}{self.RESET}"
+                return f"{levelname_colored} | {record.getMessage()}"
         
         ch.setFormatter(ColoredFormatter())
     else:
         ch.setFormatter(logging.Formatter('%(levelname)s | %(message)s'))
     
     logger.addHandler(ch)
-    logger.propagate = False  # Prevent duplicate logs
     return logger
 
 # ============================================
@@ -381,7 +381,7 @@ def mosaic_tiles(tile_files, output_file):
     return output_file.exists()
 
 # ============================================
-# BATCH DOWNLOAD WITH PROGRESS BAR
+# BATCH DOWNLOAD WITH CLEAN LOGGING
 # ============================================
 
 composites_list = modis_composites.toList(num_composites)
@@ -398,68 +398,50 @@ for i in range(num_composites):
     
     final_file = modis_dir / f"MODIS_{date_str}_{i:04d}.tif"
     
-    # Progress header
     progress_pct = (i + 1) / num_composites * 100
-    logger.info("")
     logger.info(f"[{i+1:3d}/{num_composites}] ({progress_pct:5.1f}%) Composite: {date_str}")
     
     if final_file.exists():
-        logger.info(f"            Status: SKIPPED (file exists)")
+        logger.info("Status: SKIPPED (file exists)")
         stats['skipped'] += 1
         continue
     
     # Add coordinates and dynamic layers
     composite_final = add_coordinates_and_dynamic_layers(composite)
     
-    # Download tiles with progress
+    # Download tiles with tqdm
     tile_files = []
     tiles_success = 0
     
-    logger.info(f"            Downloading {len(tiles)} tiles...")
+    logger.info(f"Downloading {len(tiles)} tiles")
     
-    for tile_idx, tile in enumerate(tiles):
+    for tile in tqdm(tiles, desc="Tiles", unit="tile", leave=False, ncols=80):
         tile_file = tiles_dir / f"img{i:05d}_t{tile['id']:02d}.tif"
-        
-        # Progress bar for tiles (compact)
-        filled = int((tile_idx + 1) / len(tiles) * 20)  # 20 chars bar
-        tile_progress = "█" * filled + "░" * (20 - filled)
-        tile_pct = (tile_idx + 1) / len(tiles) * 100
         
         if download_tile(composite_final, tile['bounds'], tile_file):
             tile_files.append(tile_file)
             tiles_success += 1
             stats['tiles_downloaded'] += 1
-            status = "✓"
-        else:
-            status = "✗"
-        
-        # Print progress on same line (overwrite)
-        progress_str = f"\r            [{tile_progress}] {tile_idx+1}/{len(tiles)} ({tile_pct:5.1f}%) {status}"
-        print(progress_str, end='', flush=True)
         
         time.sleep(config['download']['delay_between_tiles'])
     
-    # New line after tile progress
-    print()
-    
-    logger.info(f"            Tiles completed: {tiles_success}/{len(tiles)} successful")
+    logger.info(f"Tiles completed: {tiles_success}/{len(tiles)} successful")
     
     # Check minimum tiles requirement
     min_required = len(tiles) * config['download']['min_tiles_success_ratio']
     if tiles_success < min_required:
-        logger.error(f"            Status: FAILED - Insufficient tiles ({tiles_success} < {min_required:.0f} required)")
+        logger.error(f"Status: FAILED - Insufficient tiles ({tiles_success} < {min_required:.0f} required)")
         stats['errors'] += 1
-        # Cleanup partial tiles
         for tile_file in tile_files:
             if tile_file.exists():
                 tile_file.unlink()
         continue
     
     # Mosaic tiles
-    logger.info(f"            Mosaicking {tiles_success} tiles...")
+    logger.info(f"Mosaicking {tiles_success} tiles")
     if mosaic_tiles(tile_files, final_file):
         file_size_mb = final_file.stat().st_size / (1024**2)
-        logger.info(f"            Status: SUCCESS - {file_size_mb:.1f} MB")
+        logger.info(f"Status: SUCCESS - {file_size_mb:.1f} MB")
         stats['downloaded'] += 1
         
         # Cleanup tile files
@@ -467,7 +449,7 @@ for i in range(num_composites):
             if tile_file.exists():
                 tile_file.unlink()
     else:
-        logger.error(f"            Status: FAILED - Mosaic error")
+        logger.error("Status: FAILED - Mosaic error")
         stats['errors'] += 1
     
     time.sleep(config['download']['delay_between_images'])

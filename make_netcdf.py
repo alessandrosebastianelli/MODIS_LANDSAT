@@ -22,28 +22,29 @@ warnings.filterwarnings('ignore', category=RuntimeWarning)
 # ============================================
 
 def setup_logging(config):
-    """Setup logging with file and console handlers"""
+    """Setup clean, consistent logging"""
     log_level = getattr(logging, config['logging']['level'])
     log_file = config['logging']['log_file']
     
     logger = logging.getLogger('NetCDF')
     logger.setLevel(log_level)
     logger.handlers = []
+    logger.propagate = False
     
-    # File handler - detailed format
+    # File handler
     fh = logging.FileHandler(log_file, mode='a')
     fh.setLevel(log_level)
     fh.setFormatter(logging.Formatter(
-        '%(asctime)s | %(name)-12s | %(levelname)-8s | %(message)s',
+        '%(asctime)s | %(name)-15s | %(levelname)-8s | %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
     ))
     logger.addHandler(fh)
     
-    # Console handler - concise format
+    # Console handler
     ch = logging.StreamHandler()
     ch.setLevel(log_level)
     
-    if config['logging']['console_colors']:
+    if config['logging'].get('console_colors', False):
         class ColoredFormatter(logging.Formatter):
             COLORS = {
                 'DEBUG': '\033[36m',
@@ -56,16 +57,14 @@ def setup_logging(config):
             
             def format(self, record):
                 color = self.COLORS.get(record.levelname, self.RESET)
-                # Short format for console
-                formatted = f"{color}{record.levelname[0]}{self.RESET} | {record.getMessage()}"
-                return formatted
+                levelname_colored = f"{color}{record.levelname[0]}{self.RESET}"
+                return f"{levelname_colored} | {record.getMessage()}"
         
         ch.setFormatter(ColoredFormatter())
     else:
         ch.setFormatter(logging.Formatter('%(levelname)s | %(message)s'))
     
     logger.addHandler(ch)
-    logger.propagate = False  # Prevent duplicate logs
     return logger
 
 # ============================================

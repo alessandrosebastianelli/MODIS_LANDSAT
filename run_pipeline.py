@@ -16,40 +16,49 @@ import logging
 # ============================================
 
 def setup_logging(config):
+    """Setup clean, consistent logging"""
     log_level = getattr(logging, config['logging']['level'])
     log_file = config['logging']['log_file']
+    
+    logging.root.handlers = []
     
     logger = logging.getLogger('Pipeline')
     logger.setLevel(log_level)
     logger.handlers = []
+    logger.propagate = False
     
+    # File handler
     fh = logging.FileHandler(log_file, mode='a')
     fh.setLevel(log_level)
     fh.setFormatter(logging.Formatter(
-        '%(asctime)s | %(levelname)-8s | %(message)s',
+        '%(asctime)s | %(name)-15s | %(levelname)-8s | %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
     ))
     logger.addHandler(fh)
     
+    # Console handler
     ch = logging.StreamHandler()
     ch.setLevel(log_level)
     
-    if config['logging']['console_colors']:
+    if config['logging'].get('console_colors', False):
         class ColoredFormatter(logging.Formatter):
-            COLORS = {'DEBUG': '\033[36m', 'INFO': '\033[32m', 'WARNING': '\033[33m',
-                     'ERROR': '\033[31m', 'CRITICAL': '\033[35m'}
+            COLORS = {
+                'DEBUG': '\033[36m',
+                'INFO': '\033[32m',
+                'WARNING': '\033[33m',
+                'ERROR': '\033[31m',
+                'CRITICAL': '\033[35m'
+            }
             RESET = '\033[0m'
             
             def format(self, record):
                 color = self.COLORS.get(record.levelname, self.RESET)
-                record.levelname = f"{color}{record.levelname:<8}{self.RESET}"
-                return super().format(record)
+                levelname_colored = f"{color}{record.levelname[0]}{self.RESET}"
+                return f"{levelname_colored} | {record.getMessage()}"
         
-        ch.setFormatter(ColoredFormatter('%(asctime)s | %(levelname)s | %(message)s',
-                                        datefmt='%Y-%m-%d %H:%M:%S'))
+        ch.setFormatter(ColoredFormatter())
     else:
-        ch.setFormatter(logging.Formatter('%(asctime)s | %(levelname)-8s | %(message)s',
-                                         datefmt='%Y-%m-%d %H:%M:%S'))
+        ch.setFormatter(logging.Formatter('%(levelname)s | %(message)s'))
     
     logger.addHandler(ch)
     return logger
@@ -102,10 +111,6 @@ STEPS = [
 
 def run_command(cmd, description):
     """Run a command and handle errors"""
-    logger.info(f"\n{'='*70}")
-    logger.info(f"Running: {description}")
-    logger.info(f"{'='*70}")
-    logger.debug(f"Command: {' '.join(cmd)}")
     
     start_time = time.time()
     
@@ -118,16 +123,16 @@ def run_command(cmd, description):
         )
         
         elapsed = time.time() - start_time
-        logger.info(f"✓ {description} completed ({elapsed:.1f}s)")
+        logger.info(f"Step completed: {description} ({elapsed:.1f}s)")
         return True
         
     except subprocess.CalledProcessError as e:
         elapsed = time.time() - start_time
-        logger.error(f"✗ {description} failed ({elapsed:.1f}s)")
+        logger.error(f"Step failed: {description} ({elapsed:.1f}s)")
         logger.error(f"Error code: {e.returncode}")
         return False
     except FileNotFoundError:
-        logger.error(f"✗ Script not found: {cmd[1]}")
+        logger.error(f"Script not found: {cmd[1]}")
         return False
 
 def count_files(directory):
@@ -148,15 +153,15 @@ def get_dir_size(directory):
 # ============================================
 
 def main():
-    logger.info("\n" + "="*70)
+    logger.info("="*70)
     logger.info("MULTI-SENSOR LST/SST PIPELINE")
     logger.info("="*70)
-    logger.info(f"Configuration: config_refactored.yaml")
+    logger.info(f"Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     logger.info(f"Steps: {len(STEPS)}")
     logger.info(f"Validation cycles: {config['pipeline']['num_validation_cycles']}")
+    logger.info("="*70)
     
     start_time_total = datetime.now()
-    logger.info(f"Started: {start_time_total.strftime('%Y-%m-%d %H:%M:%S')}")
     
     base_dir = Path(config['output']['base_dir'])
     landsat_dir = base_dir / config['output']['subdirs']['landsat']
@@ -175,10 +180,9 @@ def main():
     # ============================================
     
     for i, step in enumerate(STEPS, 1):
-        logger.info(f"\n{'='*70}")
+        logger.info("="*70)
         logger.info(f"STEP {i}/{len(STEPS)}: {step['name']}")
-        logger.info(f"{'='*70}")
-        logger.info(f"Description: {step['description']}")
+        logger.info("="*70)
         
         # Run main script
         success = run_command(
@@ -191,10 +195,10 @@ def main():
             
             # If step requires validation, run validation cycles
             if step.get('validate', False):
-                logger.info(f"\nRunning validation cycles for {step['name']}...")
+                logger.info(f"Running validation cycles for {step['name']}")
                 
                 for cycle in range(config['pipeline']['num_validation_cycles']):
-                    logger.info(f"\nValidation cycle {cycle+1}/{config['pipeline']['num_validation_cycles']}")
+                    logger.info(f"Validation cycle {cycle+1}/{config['pipeline']['num_validation_cycles']}")
                     
                     # Validate
                     validate_success = run_command(
@@ -203,11 +207,11 @@ def main():
                     )
                     
                     if not validate_success:
-                        logger.warning("Validation failed, but continuing...")
+                        logger.warning("Validation failed, but continuing")
                     
                     # Re-download if needed (only if not last cycle)
                     if cycle < config['pipeline']['num_validation_cycles'] - 1:
-                        logger.info(f"Re-running {step['name']} to recover corrupted files...")
+                        logger.info(f"Re-running {step['name']} to recover corrupted files")
                         run_command(
                             [sys.executable, step['script']],
                             f"{step['name']} (re-run {cycle+1})"
@@ -221,7 +225,7 @@ def main():
                 logger.error("Stopping pipeline")
                 return 1
             else:
-                logger.warning(f"Optional step failed, continuing...")
+                logger.warning("Optional step failed, continuing")
         
         # Pause between steps
         if i < len(STEPS):
@@ -231,7 +235,7 @@ def main():
     # FINAL SUMMARY
     # ============================================
     
-    logger.info("\n" + "="*70)
+    logger.info("="*70)
     logger.info("PIPELINE COMPLETE")
     logger.info("="*70)
     
@@ -241,22 +245,21 @@ def main():
     logger.info(f"Started: {start_time_total.strftime('%Y-%m-%d %H:%M:%S')}")
     logger.info(f"Finished: {end_time_total.strftime('%Y-%m-%d %H:%M:%S')}")
     logger.info(f"Total time: {elapsed_total}")
-    logger.info("")
-    logger.info(f"Completed steps: {len(results['completed'])}/{len(STEPS)}")
-    logger.info(f"Failed steps: {len(results['failed'])}/{len(STEPS)}")
+    logger.info(f"Completed: {len(results['completed'])}/{len(STEPS)}")
+    logger.info(f"Failed: {len(results['failed'])}/{len(STEPS)}")
     
     if results['completed']:
-        logger.info("\nCompleted:")
+        logger.info("Completed steps:")
         for step in results['completed']:
-            logger.info(f"  ✓ {step}")
+            logger.info(f"  {step}")
     
     if results['failed']:
-        logger.info("\nFailed:")
+        logger.info("Failed steps:")
         for step in results['failed']:
-            logger.info(f"  ✗ {step}")
+            logger.info(f"  {step}")
     
     # Check outputs
-    logger.info("\n" + "="*70)
+    logger.info("="*70)
     logger.info("OUTPUT SUMMARY")
     logger.info("="*70)
     
@@ -279,13 +282,13 @@ def main():
     nc_file = Path(config['output']['netcdf_filename'])
     if nc_file.exists():
         nc_size = nc_file.stat().st_size / (1024**2)
-        logger.info(f"\nNetCDF: {nc_file.name}, {nc_size:.2f} MB")
-        logger.info("  ✓ Combined dataset ready!")
+        logger.info(f"NetCDF: {nc_file.name}, {nc_size:.2f} MB")
+        logger.info("Combined dataset ready")
     else:
-        logger.warning("\nNetCDF not created")
+        logger.warning("NetCDF not created")
     
     logger.info("="*70)
-    logger.info("✓ Pipeline execution complete!")
+    logger.info("Pipeline execution complete")
     logger.info("="*70)
     
     return 0 if len(results['failed']) == 0 else 1
@@ -299,10 +302,10 @@ if __name__ == "__main__":
         exit_code = main()
         sys.exit(exit_code)
     except KeyboardInterrupt:
-        logger.warning("\nPipeline interrupted by user")
+        logger.warning("Pipeline interrupted by user")
         sys.exit(1)
     except Exception as e:
-        logger.critical(f"\nUnexpected error: {str(e)}")
+        logger.critical(f"Unexpected error: {str(e)}")
         import traceback
         traceback.print_exc()
         sys.exit(1)
