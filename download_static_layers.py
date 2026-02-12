@@ -13,6 +13,7 @@ import rasterio
 from rasterio.merge import merge
 import numpy as np
 from tqdm import tqdm
+import subprocess
 
 # ============================================
 # LOGGING SETUP
@@ -22,6 +23,10 @@ def setup_logging(config):
     """Setup clean, consistent logging"""
     log_level = getattr(logging, config['logging']['level'])
     log_file = config['logging']['log_file']
+    
+    # Move to logs/ directory
+    log_file = Path('logs') / Path(log_file).name
+    log_file.parent.mkdir(parents=True, exist_ok=True)
     
     logger = logging.getLogger('StaticLayers')
     logger.setLevel(log_level)
@@ -174,34 +179,52 @@ def download_tile(image, tile_bounds, filename):
         return False
 
 def mosaic_tiles(tile_files, output_file):
-    """Mosaic tiles into single file"""
-    src_files = [rasterio.open(f) for f in tile_files if f.exists()]
+    """Mosaic tiles into single file using GDAL VRT"""
+    valid_tiles = [f for f in tile_files if f.exists() and f.stat().st_size > 1000]
     
-    if len(src_files) == 0:
+    if len(valid_tiles) == 0:
+        logger.error("No valid tiles to mosaic")
         return False
     
-    mosaic, out_trans = merge(src_files)
-    
-    out_meta = src_files[0].meta.copy()
-    out_meta.update({
-        "driver": "GTiff",
-        "height": mosaic.shape[1],
-        "width": mosaic.shape[2],
-        "transform": out_trans,
-        "compress": "deflate",
-        "predictor": 2,
-        "tiled": True,
-        "blockxsize": 256,
-        "blockysize": 256
-    })
-    
-    with rasterio.open(output_file, "w", **out_meta) as dest:
-        dest.write(mosaic)
-    
-    for src in src_files:
-        src.close()
-    
-    return output_file.exists()
+    try:
+        # Create VRT (virtual mosaic)
+        vrt_file = output_file.parent / f"{output_file.stem}_temp.vrt"
+        
+        # Build VRT using subprocess
+        vrt_cmd = ['gdalbuildvrt', str(vrt_file)] + [str(f) for f in valid_tiles]
+        result = subprocess.run(vrt_cmd, capture_output=True, text=True)
+        
+        if result.returncode != 0:
+            logger.error(f"VRT creation failed: {result.stderr}")
+            return False
+        
+        # Translate VRT to compressed GeoTIFF
+        tif_cmd = [
+            'gdal_translate',
+            '-co', 'COMPRESS=DEFLATE',
+            '-co', 'PREDICTOR=2',
+            '-co', 'TILED=YES',
+            '-co', 'BLOCKXSIZE=256',
+            '-co', 'BLOCKYSIZE=256',
+            str(vrt_file),
+            str(output_file)
+        ]
+        
+        result = subprocess.run(tif_cmd, capture_output=True, text=True)
+        
+        if result.returncode != 0:
+            logger.error(f"GeoTIFF creation failed: {result.stderr}")
+            return False
+        
+        # Cleanup VRT
+        if vrt_file.exists():
+            vrt_file.unlink()
+        
+        return output_file.exists() and output_file.stat().st_size > 1000
+        
+    except Exception as e:
+        logger.error(f"Mosaic error: {e}")
+        return False
 
 # ============================================
 # 1. DOWNLOAD DEM
@@ -301,3 +324,12 @@ for f in files_created:
 logger.info("\nNote: Land Cover and Emissivity are downloaded dynamically")
 logger.info("      with each Landsat/MODIS composite (15-day frequency)")
 logger.info("="*70)
+
+# Cleanup temporary tiles directory
+import shutil
+if tiles_dir.exists():
+    try:
+        shutil.rmtree(tiles_dir)
+        logger.info(f"Cleaned up temporary tiles: {tiles_dir}")
+    except Exception as e:
+        logger.warning(f"Could not remove tiles directory: {e}")

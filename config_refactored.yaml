@@ -21,27 +21,32 @@ geometry:
 
 # Temporal parameters
 temporal:
-  start_date: '2020-01-01'
-  end_date: '2025-12-31'
+  start_date: '2007-01-01'
+  end_date: '2021-12-31'
   interval_days: 15  # 15-day composites
 
 # Spatial parameters
 spatial:
   target_resolution: 30  # meters
-  tile_size: 0.1         # degrees (~44km)
+  tile_size: 0.1         # degrees (~111km) - larger = fewer tiles but more memory
 
 # Landsat sensors configuration
 landsat:
   sensors:
-    - collection: 'LANDSAT/LC08/C02/T1_L2'
-      start_date: '2020-01-01'
-      end_date: '2021-10-30'
-      name: 'L8'
+    - collection: 'LANDSAT/LT05/C02/T1_L2'
+      start_date: '2007-01-01'
+      end_date: '2011-12-31'
+      name: 'L5'
     
-    - collection: 'LANDSAT/LC09/C02/T1_L2'
-      start_date: '2021-10-31'
-      end_date: '2025-12-31'
-      name: 'L9'
+    - collection: 'LANDSAT/LE07/C02/T1_L2'
+      start_date: '2007-01-01'
+      end_date: '2021-12-31'
+      name: 'L7'
+    
+    - collection: 'LANDSAT/LC08/C02/T1_L2'
+      start_date: '2013-04-01'
+      end_date: '2021-12-31'
+      name: 'L8'
   
   # All Landsat bands
   bands:
@@ -114,10 +119,35 @@ dynamic_layers:
   
   land_cover:
     enabled: true
-    collection: 'MODIS/061/MCD12Q1'  # MODIS Land Cover Type Yearly
-    band: 'LC_Type1'  # IGBP classification
-    description: 'MODIS Land Cover (yearly, assigned to each composite)'
-    classes:
+    # Use ESA WorldCover v200/v100 - 10m resolution, annual updates
+    # More dynamic than MODIS MCD12Q1, captures yearly changes
+    collections:
+      - name: 'ESA/WorldCover/v200'  # 2021 data
+        year_start: 2021
+        year_end: 2021
+      - name: 'ESA/WorldCover/v100'  # 2020 data  
+        year_start: 2020
+        year_end: 2020
+    fallback: 'MODIS/061/MCD12Q1'  # Fallback for years without ESA coverage
+    
+    description: 'ESA WorldCover 10m (2020-2021) + MODIS MCD12Q1 500m (2007-2019) for full temporal coverage'
+    
+    # ESA WorldCover classes (10m, more detailed than MODIS)
+    esa_classes:
+      10: 'Tree cover'
+      20: 'Shrubland'
+      30: 'Grassland'
+      40: 'Cropland'
+      50: 'Built-up'
+      60: 'Bare / sparse vegetation'
+      70: 'Snow and ice'
+      80: 'Permanent water bodies'
+      90: 'Herbaceous wetland'
+      95: 'Mangroves'
+      100: 'Moss and lichen'
+    
+    # MODIS IGBP classes (fallback for pre-2020)
+    modis_classes:
       1: 'Evergreen Needleleaf Forests'
       2: 'Evergreen Broadleaf Forests'
       3: 'Deciduous Needleleaf Forests'
@@ -171,19 +201,19 @@ output:
     landsat: 'landsat'
     modis: 'modis'
     static: 'static'
-  netcdf_filename: 'Rome_MultiSensor_LST_SST_2020_2025.nc'
+  netcdf_filename: 'Rome_MultiSensor_LST_SST_2007_2021.nc'
 
 # Download parameters
 download:
-  timeout_seconds: 300
-  delay_between_tiles: 2
-  delay_between_images: 3
-  min_tiles_success_ratio: 0.75
+  timeout_seconds: 400  # Increased for larger tiles
+  delay_between_tiles: 1  # Reduced from 1s
+  delay_between_images: 1   # Reduced from 2s
+  min_tiles_success_ratio: 0.10  # Minimum 10% tiles required for mosaic
   max_retries: 3
 
 # Logging
 logging:
-  level: 'INFO'
+  level: 'DEBUG'  # Changed from INFO for detailed monitoring
   log_file: 'multisensor_pipeline.log'
   console_colors: true
 

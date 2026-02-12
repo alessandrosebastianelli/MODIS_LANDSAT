@@ -14,15 +14,39 @@ import logging
 import rasterio
 from rasterio.merge import merge
 from tqdm import tqdm
+import argparse
+import sys
+import subprocess
+
+# ============================================
+# COMMAND LINE ARGUMENTS
+# ============================================
+
+parser = argparse.ArgumentParser(description='Download MODIS data')
+parser.add_argument('--year', type=int, default=None,
+                    help='Download data for specific year only')
+parser.add_argument('--start-year', type=int, default=None,
+                    help='Start year for filtering')
+parser.add_argument('--end-year', type=int, default=None,
+                    help='End year for filtering')
+args = parser.parse_args()
 
 # ============================================
 # LOGGING SETUP
 # ============================================
 
-def setup_logging(config):
+def setup_logging(config, year_suffix=None):
     """Setup clean, consistent logging"""
     log_level = getattr(logging, config['logging']['level'])
     log_file = config['logging']['log_file']
+    
+    # Add year suffix if provided
+    if year_suffix:
+        log_file = log_file.replace('.log', f'_{year_suffix}.log')
+    
+    # Move to logs/ directory
+    log_file = Path('logs') / Path(log_file).name
+    log_file.parent.mkdir(parents=True, exist_ok=True)
     
     logger = logging.getLogger('MODIS')
     logger.setLevel(log_level)
@@ -72,7 +96,7 @@ def setup_logging(config):
 with open('config_refactored.yaml', 'r') as f:
     config = yaml.safe_load(f)
 
-logger = setup_logging(config)
+logger = setup_logging(config, year_suffix=args.year if args.year else None)
 
 try:
     ee.Initialize(project=config['ee_project'])
@@ -103,9 +127,23 @@ interval_days = config['temporal']['interval_days']
 TARGET_RESOLUTION = config['spatial']['target_resolution']
 TILE_SIZE = config['spatial']['tile_size']
 
+# Override dates if year filtering requested
+if args.year:
+    start_date = f'{args.year}-01-01'
+    end_date = f'{args.year}-12-31'
+    logger.info(f"Filtering to year: {args.year}")
+elif args.start_year or args.end_year:
+    if args.start_year:
+        start_date = f'{args.start_year}-01-01'
+    if args.end_year:
+        end_date = f'{args.end_year}-12-31'
+    logger.info(f"Filtering to range: {start_date} to {end_date}")
+
+logger.info(f"Date range: {start_date} to {end_date}")
+
 base_dir = Path(config['output']['base_dir'])
 modis_dir = base_dir / config['output']['subdirs']['modis']
-tiles_dir = modis_dir / 'tiles_temp'
+tiles_dir = modis_dir / f'tiles_temp_{args.year}' if args.year else modis_dir / 'tiles_temp'
 
 modis_dir.mkdir(parents=True, exist_ok=True)
 tiles_dir.mkdir(parents=True, exist_ok=True)
@@ -199,12 +237,12 @@ def process_modis(image):
     emis_32 = image.select('Emis_32').multiply(0.002).add(0.49).rename('MODIS_Emis_32')
     
     # View angles (scale: value * 1.0, degrees)
-    view_angle_day = image.select('View_angle_Day').rename('MODIS_View_angle_Day')
-    view_angle_night = image.select('View_angle_Night').rename('MODIS_View_angle_Night')
+    view_angle_day = image.select('Day_view_angle').rename('MODIS_View_angle_Day')
+    view_angle_night = image.select('Night_view_angle').rename('MODIS_View_angle_Night')
     
     # View times (scale: value * 0.1, hours)
-    view_time_day = image.select('View_time_Day').multiply(0.1).rename('MODIS_View_time_Day')
-    view_time_night = image.select('View_time_Night').multiply(0.1).rename('MODIS_View_time_Night')
+    view_time_day = image.select('Day_view_time').multiply(0.1).rename('MODIS_View_time_Day')
+    view_time_night = image.select('Night_view_time').multiply(0.1).rename('MODIS_View_time_Night')
     
     # Combine all
     result = (lst_day
@@ -352,33 +390,48 @@ def download_tile(image, tile_bounds, filename):
         return False
 
 def mosaic_tiles(tile_files, output_file):
-    src_files = [rasterio.open(f) for f in tile_files if f.exists()]
+    """Mosaic tiles into single file using GDAL VRT"""
+    valid_tiles = [f for f in tile_files if f.exists() and f.stat().st_size > 1000]
     
-    if len(src_files) == 0:
+    if len(valid_tiles) == 0:
+        logger.error("No valid tiles to mosaic")
         return False
     
-    mosaic, out_trans = merge(src_files)
-    
-    out_meta = src_files[0].meta.copy()
-    out_meta.update({
-        "driver": "GTiff",
-        "height": mosaic.shape[1],
-        "width": mosaic.shape[2],
-        "transform": out_trans,
-        "compress": "deflate",
-        "predictor": 2,
-        "tiled": True,
-        "blockxsize": 256,
-        "blockysize": 256
-    })
-    
-    with rasterio.open(output_file, "w", **out_meta) as dest:
-        dest.write(mosaic)
-    
-    for src in src_files:
-        src.close()
-    
-    return output_file.exists()
+    try:
+        vrt_file = output_file.parent / f"{output_file.stem}_temp.vrt"
+        
+        vrt_cmd = ['gdalbuildvrt', str(vrt_file)] + [str(f) for f in valid_tiles]
+        result = subprocess.run(vrt_cmd, capture_output=True, text=True)
+        
+        if result.returncode != 0:
+            logger.error(f"VRT creation failed: {result.stderr}")
+            return False
+        
+        tif_cmd = [
+            'gdal_translate',
+            '-co', 'COMPRESS=DEFLATE',
+            '-co', 'PREDICTOR=2',
+            '-co', 'TILED=YES',
+            '-co', 'BLOCKXSIZE=256',
+            '-co', 'BLOCKYSIZE=256',
+            str(vrt_file),
+            str(output_file)
+        ]
+        
+        result = subprocess.run(tif_cmd, capture_output=True, text=True)
+        
+        if result.returncode != 0:
+            logger.error(f"GeoTIFF creation failed: {result.stderr}")
+            return False
+        
+        if vrt_file.exists():
+            vrt_file.unlink()
+        
+        return output_file.exists() and output_file.stat().st_size > 1000
+        
+    except Exception as e:
+        logger.error(f"Mosaic error: {e}")
+        return False
 
 # ============================================
 # BATCH DOWNLOAD WITH CLEAN LOGGING
@@ -388,6 +441,9 @@ composites_list = modis_composites.toList(num_composites)
 
 logger.info("="*70)
 logger.info(f"Starting MODIS download: {num_composites} composites")
+logger.info(f"Estimated tiles per composite: {len(tiles)}")
+logger.info(f"Total downloads: {num_composites * len(tiles)} tiles")
+logger.info(f"Estimated time: {num_composites * len(tiles) * config['download']['delay_between_tiles'] / 60:.1f} min (delays only)")
 logger.info("="*70)
 
 stats = {'downloaded': 0, 'skipped': 0, 'errors': 0, 'tiles_downloaded': 0}
@@ -409,23 +465,29 @@ for i in range(num_composites):
     # Add coordinates and dynamic layers
     composite_final = add_coordinates_and_dynamic_layers(composite)
     
-    # Download tiles with tqdm
+    # Download all tiles for this composite
     tile_files = []
     tiles_success = 0
     
     logger.info(f"Downloading {len(tiles)} tiles")
     
-    for tile in tqdm(tiles, desc="Tiles", unit="tile", leave=False, ncols=80):
-        tile_file = tiles_dir / f"img{i:05d}_t{tile['id']:02d}.tif"
+    for tile_idx, tile in enumerate(tqdm(tiles, desc="Tiles", unit="tile", leave=False, ncols=80)):
+        tile_file = tiles_dir / f"{date_str.replace('-', '')}_c{i:03d}_t{tile['id']:02d}.tif"
+        
+        logger.debug(f"  Tile {tile_idx+1}/{len(tiles)}: bounds={tile['bounds']}")
         
         if download_tile(composite_final, tile['bounds'], tile_file):
             tile_files.append(tile_file)
             tiles_success += 1
             stats['tiles_downloaded'] += 1
+            file_size = tile_file.stat().st_size / 1024  # KB
+            logger.debug(f"    SUCCESS: {file_size:.1f} KB")
+        else:
+            logger.warning(f"    FAILED: Tile {tile_idx} download error")
         
         time.sleep(config['download']['delay_between_tiles'])
     
-    logger.info(f"Tiles completed: {tiles_success}/{len(tiles)} successful")
+    logger.info(f"Tiles completed: {tiles_success}/{len(tiles)} successful ({tiles_success/len(tiles)*100:.1f}%)")
     
     # Check minimum tiles requirement
     min_required = len(tiles) * config['download']['min_tiles_success_ratio']
@@ -481,10 +543,19 @@ logger.info("    MODIS_QC_Day, MODIS_QC_Night")
 logger.info("    MODIS_Emis_31, MODIS_Emis_32")
 logger.info("    MODIS_View_angle_Day, MODIS_View_angle_Night")
 logger.info("    MODIS_View_time_Day, MODIS_View_time_Night")
-logger.info("  Dynamic layers (15-day frequency):")
+logger.info(f"  Dynamic layers ({interval_days}-day frequency):")
 logger.info("    land_cover: MODIS land cover")
 logger.info("    emissivity_dynamic: Emissivity from land cover")
 logger.info("  Coordinates:")
 logger.info("    lon, lat, time")
 logger.info(f"  Total: ~17 bands per file")
 logger.info("="*70)
+
+# Cleanup temporary tiles directory
+import shutil
+if tiles_dir.exists():
+    try:
+        shutil.rmtree(tiles_dir)
+        logger.info(f"Cleaned up temporary tiles: {tiles_dir}")
+    except Exception as e:
+        logger.warning(f"Could not remove tiles directory: {e}")

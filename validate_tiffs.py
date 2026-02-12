@@ -61,6 +61,8 @@ parser.add_argument("--delete", action="store_true",
                     help="Delete corrupted files")
 parser.add_argument("--dir", type=str, default=None,
                     help="Specific directory to validate (overrides config)")
+parser.add_argument("--year", type=int, default=None,
+                    help="Validate files for specific year only")
 args = parser.parse_args()
 
 # ============================================
@@ -105,6 +107,10 @@ def validate_directory(directory):
         return {'valid': 0, 'corrupted': 0, 'size_valid': 0, 'size_corrupted': 0}
     
     tif_files = sorted(directory.glob("*.tif"))
+    
+    # Filter by year if specified
+    if args.year:
+        tif_files = [f for f in tif_files if f"-{args.year}-" in f.stem]
     
     if len(tif_files) == 0:
         logger.info(f"No TIFF files in {directory}")
