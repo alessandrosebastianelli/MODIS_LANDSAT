@@ -28,7 +28,7 @@ temporal:
 # Spatial parameters
 spatial:
   target_resolution: 30  # meters
-  tile_size: 0.1         # degrees (~111km) - larger = fewer tiles but more memory
+  tile_size: 0.1
 
 # Landsat sensors configuration
 landsat:
@@ -37,29 +37,35 @@ landsat:
       start_date: '2007-01-01'
       end_date: '2011-12-31'
       name: 'L5'
+      thermal_band: 'ST_B6'        # L5 thermal band name in C02
+      thermal_wavelength: 11.45    # µm center wavelength for LST formula
     
     - collection: 'LANDSAT/LE07/C02/T1_L2'
       start_date: '2007-01-01'
       end_date: '2021-12-31'
       name: 'L7'
+      thermal_band: 'ST_B6'        # L7 thermal band name in C02
+      thermal_wavelength: 11.45    # µm center wavelength for LST formula
     
     - collection: 'LANDSAT/LC08/C02/T1_L2'
       start_date: '2013-04-01'
       end_date: '2021-12-31'
       name: 'L8'
+      thermal_band: 'ST_B10'       # L8 thermal band name in C02
+      thermal_wavelength: 10.895   # µm center wavelength for LST formula
   
-  # All Landsat bands
+  # All Landsat bands (after harmonization to L8-style naming)
   bands:
-    # Surface Reflectance (scaled 0-1)
-    - 'SR_B1'      # Coastal/Aerosol (0.43-0.45 µm)
-    - 'SR_B2'      # Blue (0.45-0.51 µm)
-    - 'SR_B3'      # Green (0.53-0.59 µm)
-    - 'SR_B4'      # Red (0.64-0.67 µm)
-    - 'SR_B5'      # NIR (0.85-0.88 µm)
-    - 'SR_B6'      # SWIR1 (1.57-1.65 µm)
-    - 'SR_B7'      # SWIR2 (2.11-2.29 µm)
+    # Surface Reflectance (scaled 0-1 after multiply(2.75e-5).add(-0.2))
+    - 'SR_B1'      # Coastal/Aerosol (L8 only; zero-filled for L5/L7)
+    - 'SR_B2'      # Blue
+    - 'SR_B3'      # Green
+    - 'SR_B4'      # Red
+    - 'SR_B5'      # NIR
+    - 'SR_B6'      # SWIR1
+    - 'SR_B7'      # SWIR2
     # Thermal
-    - 'ST_B10'     # Thermal Infrared (10.6-11.19 µm)
+    - 'ST_B10'     # Thermal Infrared (harmonized name)
     # Quality
     - 'QA_PIXEL'   # Quality assessment
   
@@ -71,23 +77,24 @@ landsat:
     rows: []
 
 # MODIS configuration
+# IMPORTANT: Use Collection 061 (6.1) - Collection 006 is deprecated
 modis:
   collections:
-    terra: 'MODIS/006/MOD11A1'
-    aqua: 'MODIS/006/MYD11A1'
+    terra: 'MODIS/061/MOD11A1'   # Collection 6.1 Terra
+    aqua: 'MODIS/061/MYD11A1'    # Collection 6.1 Aqua
   
   # All relevant MODIS bands (resampled 1km -> 30m)
   bands:
-    - 'LST_Day_1km'      # Daytime LST
-    - 'LST_Night_1km'    # Nighttime LST
-    - 'QC_Day'           # Daytime QC
-    - 'QC_Night'         # Nighttime QC
-    - 'Emis_31'          # Band 31 emissivity (10.78-11.28 µm)
-    - 'Emis_32'          # Band 32 emissivity (11.77-12.27 µm)
-    - 'View_angle_Day'   # Daytime view angle
-    - 'View_angle_Night' # Nighttime view angle
-    - 'View_time_Day'    # Daytime observation time
-    - 'View_time_Night'  # Nighttime observation time
+    - 'LST_Day_1km'      # Daytime LST (raw DN, scale: *0.02 -> Kelvin)
+    - 'LST_Night_1km'    # Nighttime LST (raw DN, scale: *0.02 -> Kelvin)
+    - 'QC_Day'           # Daytime QC flags
+    - 'QC_Night'         # Nighttime QC flags
+    - 'Emis_31'          # Band 31 emissivity (scale: *0.002 + 0.49)
+    - 'Emis_32'          # Band 32 emissivity (scale: *0.002 + 0.49)
+    - 'Day_view_angle'   # Daytime view zenith angle (offset: -65)
+    - 'Night_view_angle' # Nighttime view zenith angle (offset: -65)
+    - 'Day_view_time'    # Daytime observation time (scale: *0.1 -> hours)
+    - 'Night_view_time'  # Nighttime observation time (scale: *0.1 -> hours)
 
 # Static layers (downloaded once - truly time-independent)
 static_layers:
@@ -96,43 +103,36 @@ static_layers:
     enabled: true
     collection: 'USGS/SRTMGL1_003'  # SRTM 30m DEM
     bands: ['elevation']
-    description: 'Digital Elevation Model (static)'
+    description: 'Digital Elevation Model (SRTM 30m, static)'
   
   water_mask:
     enabled: true
-    # Combined water mask from multiple sources
     sources:
-      - collection: 'JRC/GSW1_4/GlobalSurfaceWater'  # JRC Global Surface Water
-        band: 'occurrence'  # Water occurrence (0-100%)
-        threshold: 50  # Pixels with >50% water occurrence
+      - collection: 'JRC/GSW1_4/GlobalSurfaceWater'
+        band: 'occurrence'
+        threshold: 50        # Pixels with >50% water occurrence are water
       
-      - collection: 'GLCF/GLS_WATER'  # Global Land Cover Facility
-        band: 'water'
-        
-      - collection: 'ESA/WorldCover/v200'  # ESA land cover water classes
-        classes: [80, 90, 95]  # Water bodies, wetlands, mangroves
+      - collection: 'ESA/WorldCover/v200'
+        classes: [80, 90, 95]  # Permanent water, herbaceous wetland, mangroves
     
-    description: 'Combined water mask (seas, oceans, rivers, lakes) - static'
+    description: 'Combined water mask (JRC GSW + ESA WorldCover) - static'
 
-# Dynamic layers (same frequency as Landsat/MODIS - 15 day composites)
+# Dynamic layers (computed per-composite, 15-day frequency)
 dynamic_layers:
   
   land_cover:
     enabled: true
-    # Use ESA WorldCover v200/v100 - 10m resolution, annual updates
-    # More dynamic than MODIS MCD12Q1, captures yearly changes
     collections:
-      - name: 'ESA/WorldCover/v200'  # 2021 data
+      - name: 'ESA/WorldCover/v200'
         year_start: 2021
         year_end: 2021
-      - name: 'ESA/WorldCover/v100'  # 2020 data  
+      - name: 'ESA/WorldCover/v100'
         year_start: 2020
         year_end: 2020
-    fallback: 'MODIS/061/MCD12Q1'  # Fallback for years without ESA coverage
+    fallback: 'MODIS/061/MCD12Q1'   # For 2007-2019
     
-    description: 'ESA WorldCover 10m (2020-2021) + MODIS MCD12Q1 500m (2007-2019) for full temporal coverage'
+    description: 'ESA WorldCover 10m (2020-2021) + MODIS MCD12Q1 500m (2007-2019)'
     
-    # ESA WorldCover classes (10m, more detailed than MODIS)
     esa_classes:
       10: 'Tree cover'
       20: 'Shrubland'
@@ -146,7 +146,6 @@ dynamic_layers:
       95: 'Mangroves'
       100: 'Moss and lichen'
     
-    # MODIS IGBP classes (fallback for pre-2020)
     modis_classes:
       1: 'Evergreen Needleleaf Forests'
       2: 'Evergreen Broadleaf Forests'
@@ -168,8 +167,8 @@ dynamic_layers:
   
   emissivity:
     enabled: true
-    description: 'Land surface emissivity derived from MODIS land cover'
-    # Emissivity lookup by MODIS LC_Type1 class
+    description: 'Land surface emissivity derived from MODIS land cover (IGBP classes)'
+    # Values based on Snyder et al. 1998 and Sobrino et al. 2008
     lookup:
       1: 0.990   # Evergreen Needleleaf Forests
       2: 0.990   # Evergreen Broadleaf Forests
@@ -183,7 +182,7 @@ dynamic_layers:
       10: 0.970  # Grasslands
       11: 0.980  # Permanent Wetlands
       12: 0.985  # Croplands
-      13: 0.990  # Urban and Built-up
+      13: 0.990  # Urban and Built-up (accounts for concrete/asphalt mix)
       14: 0.985  # Cropland/Natural Vegetation Mosaics
       15: 0.950  # Permanent Snow and Ice
       16: 0.930  # Barren
@@ -191,29 +190,30 @@ dynamic_layers:
 
 # Compositing method
 compositing:
-  method: 'median'  # 'median', 'mean', or 'mosaic'
+  method: 'median'   # 'median' recommended for LST (removes outliers)
   quality_mosaic: true
 
 # Output configuration
 output:
-  base_dir: './LST_Rome_30m_15day'
+  base_dir: './LST_Rome_30m_15day_new'
   subdirs:
     landsat: 'landsat'
     modis: 'modis'
     static: 'static'
   netcdf_filename: 'Rome_MultiSensor_LST_SST_2007_2021.nc'
+  netcdf_yearly_subdir: 'netcdf_yearly'
 
 # Download parameters
 download:
-  timeout_seconds: 400  # Increased for larger tiles
-  delay_between_tiles: 1  # Reduced from 1s
-  delay_between_images: 1   # Reduced from 2s
-  min_tiles_success_ratio: 0.10  # Minimum 10% tiles required for mosaic
+  timeout_seconds: 600       # Seconds before tile request times out
+  delay_between_tiles: 0.1   # Seconds between tile requests (0.1 = ~10x speedup vs 1s)
+  delay_between_images: 0.5  # Seconds between composites
+  min_tiles_success_ratio: 0.10  # At least 10% of tiles required for valid mosaic
   max_retries: 3
 
 # Logging
 logging:
-  level: 'DEBUG'  # Changed from INFO for detailed monitoring
+  level: 'INFO'
   log_file: 'multisensor_pipeline.log'
   console_colors: true
 
