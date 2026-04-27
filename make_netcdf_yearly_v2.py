@@ -104,6 +104,47 @@ logger.info("="*70)
 
 # Landsat bands in the order they appear in the output TIF
 # (matches the addBands() sequence in download_landsat.py)
+# LANDSAT_BANDS = [
+#     # Original SR bands (after harmonization to L8 naming)
+#     'SR_B1',        # Coastal/aerosol (zero for L5/L7)
+#     'SR_B2',        # Blue
+#     'SR_B3',        # Green
+#     'SR_B4',        # Red
+#     'SR_B5',        # NIR
+#     'SR_B6',        # SWIR1
+#     'SR_B7',        # SWIR2
+#     'ST_B10',       # Thermal brightness temperature (K)
+#     'QA_PIXEL',     # Quality flags bitmask
+#     # Spectral indices
+#     'NDVI',
+#     'NDWI',
+#     'NDBI',
+#     'MNDWI',
+#     'SAVI',
+#     'EVI',
+#     'BSI',
+#     'UI',
+#     'Albedo',
+#     'FV',           # Fractional vegetation cover
+#     # Emissivity
+#     'emissivity',   # FVC-based emissivity (used for LST)
+#     # Cloud
+#     'cloud_mask',
+#     # Temperature products
+#     'LST_K',        # Land Surface Temperature (Kelvin)
+#     'LST_K_masked', # LST with cloud mask applied
+#     'SST_K',        # Sea Surface Temperature (= LST; water masking in netcdf step)
+#     'LSSTSST',      # Merged land-sea temperature field
+#     # Coordinates and auxiliary
+#     'lon',
+#     'lat',
+#     'time_days',    # Days since 1970-01-01
+#     'land_cover',
+#     'emissivity_dynamic',  # Emissivity from land cover lookup
+#     'AOD_047',
+#     'AOD_055',
+# ]
+
 LANDSAT_BANDS = [
     # Original SR bands (after harmonization to L8 naming)
     'SR_B1',        # Coastal/aerosol (zero for L5/L7)
@@ -115,6 +156,12 @@ LANDSAT_BANDS = [
     'SR_B7',        # SWIR2
     'ST_B10',       # Thermal brightness temperature (K)
     'QA_PIXEL',     # Quality flags bitmask
+    # Temperature products
+    'LST_K',        # Land Surface Temperature (Kelvin)
+    'LST_K_masked', # LST with cloud mask applied
+    'SST_K',        # Sea Surface Temperature (= LST; water masking in netcdf step)
+    # Cloud
+    'cloud_mask',
     # Spectral indices
     'NDVI',
     'NDWI',
@@ -128,14 +175,6 @@ LANDSAT_BANDS = [
     'FV',           # Fractional vegetation cover
     # Emissivity
     'emissivity',   # FVC-based emissivity (used for LST)
-    # Cloud
-    'cloud_mask',
-    # Temperature products
-    'LST_K',        # Land Surface Temperature (Kelvin)
-    'LST_K_masked', # LST with cloud mask applied
-    'SST_K',        # Sea Surface Temperature (= LST; water masking in netcdf step)
-    'LSSTSST',      # Merged land-sea temperature field
-    # Coordinates and auxiliary
     'lon',
     'lat',
     'time_days',    # Days since 1970-01-01

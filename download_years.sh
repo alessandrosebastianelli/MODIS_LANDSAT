@@ -16,7 +16,7 @@ for year in {2007..2021}; do
         bsub \
             -J "${job_name}" \
             -q s_long \
-            -M 100G \
+            -M 30G \
             -P R000 \
             -oo "logs/out/${job_name}.out" \
             -eo "logs/err/${job_name}.err" \
@@ -28,7 +28,7 @@ for year in {2007..2021}; do
         bsub \
             -J "${job_name}" \
             -q s_long \
-            -M 100G \
+            -M 30G \
             -P R000 \
             -oo "logs/out/${job_name}.out" \
             -eo "logs/err/${job_name}.err" \
